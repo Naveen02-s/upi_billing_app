@@ -24,3 +24,36 @@ exports.createPayment = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const txn = await Transaction.findById(id);
+
+    if (!txn) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    res.json(txn);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.updateStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const txn = await Transaction.findByIdAndUpdate(
+      id,
+      { status: "success" },
+      { new: true }
+    );
+
+    res.json(txn);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

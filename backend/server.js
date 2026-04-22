@@ -1,29 +1,44 @@
-require("dotenv").config({ path: "./.env" }); // 👈 FORCE PATH
+require("dotenv").config({ path: "./.env" });
 
 const express = require("express");
-const connectDB = require("./config/db");
-
-console.log("ENV:", process.env.MONGO_URI); // debug
-
-connectDB();
+const cors = require("cors");
+const mongoose = require("mongoose");
 
 const app = express();
 
+// Middleware
 app.use(express.json());
 
+app.use(cors({
+  origin: "http://localhost:5173",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+
+// Routes
+const authRoutes = require("./routes/authRoutes");
+const transactionRoutes = require("./routes/transactionRoutes");
+
+app.use("/api/auth", authRoutes);
+app.use("/api", transactionRoutes);
+
+
+
+// Test route
 app.get("/", (req, res) => {
   res.send("API is running 🚀");
 });
 
-app.listen(5000, () => {
-  console.log("Server running on port 5000");
-});
+// ✅ Connect DB FIRST, then start server
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => {
+    console.log("MongoDB Connected ✅");
 
-const authRoutes = require("./routes/authRoutes");
+    app.listen(5000, () => {
+      console.log("Server running on port 5000 🚀");
+    });
+  })
+  .catch(err => {
+    console.log("MongoDB Error ❌:", err.message);
+  });
 
-app.use("/api/auth", authRoutes);
-
-const transactionRoutes = require("./routes/transactionRoutes");
-
-app.use(express.json());
-app.use("/api", transactionRoutes);
