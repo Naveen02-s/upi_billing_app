@@ -22,3 +22,8 @@ app.listen(5000, () => {
 const authRoutes = require("./routes/authRoutes");
 
 app.use("/api/auth", authRoutes);
+
+const transactionRoutes = require("./routes/transactionRoutes");
+
+app.use(express.json());
+app.use("/api", transactionRoutes);
