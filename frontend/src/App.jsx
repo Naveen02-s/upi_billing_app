@@ -1,13 +1,29 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-
 function App() {
   const [amount, setAmount] = useState("");
   const [qr, setQr] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
+  const [currentId, setCurrentId] = useState("");
+
+  const simulatePayment = async (status) => {
+    if (!currentId) return;
+
+    try {
+      await fetch(`http://localhost:5000/api/simulate/${currentId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status }), // 🔥 send status
+      });
+    } catch (err) {
+      console.log(err);
+    }
+  };
 
   const fetchTransactions = async () => {
     const res = await fetch("http://localhost:5000/api/transactions");
@@ -36,6 +52,7 @@ function App() {
 
     const data = await res.json();
     setQr(data.qrCode);
+    setCurrentId(data.transaction._id);
     pollStatus(data.transaction._id);
     setLoading(false);
   };
@@ -136,6 +153,24 @@ function App() {
                     <img src={qr} className="w-40" />
                   </div>
                 </motion.div>
+              )}
+
+              {qr && (
+                <div className="mt-4 space-y-2">
+                  <button
+                    onClick={() => simulatePayment("success")}
+                    className="w-full bg-green-500 hover:bg-green-400 text-black p-2 rounded-lg"
+                  >
+                    ✅ Simulate Success
+                  </button>
+
+                  <button
+                    onClick={() => simulatePayment("failed")}
+                    className="w-full bg-red-500 hover:bg-red-400 text-white p-2 rounded-lg"
+                  >
+                    ❌ Simulate Failure
+                  </button>
+                </div>
               )}
             </AnimatePresence>
 
