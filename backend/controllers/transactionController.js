@@ -57,3 +57,12 @@ exports.updateStatus = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getAllTransactions = async (req, res) => {
+  try {
+    const txns = await Transaction.find().sort({ createdAt: -1 });
+    res.json(txns);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
