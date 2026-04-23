@@ -33,6 +33,12 @@ function App() {
 
   useEffect(() => {
     fetchTransactions();
+
+    const interval = setInterval(() => {
+      fetchTransactions();
+    }, 1500); // every 1.5 seconds
+
+    return () => clearInterval(interval);
   }, []);
 
   const createPayment = async () => {
@@ -226,8 +232,8 @@ function App() {
                   <span
                     className={`text-xs px-3 py-1 rounded-full ${
                       t.status === "success"
-                        ? "bg-green-500/20 text-green-300"
-                        : "bg-yellow-500/20 text-yellow-300"
+                        ? "bg-green-500/20 text-green-300" 
+                        : (t.status === "pending" ? "bg-yellow-500/20 text-yellow-300" : "bg-red-500/20 text-red-300")
                     }`}
                   >
                     {t.status}
