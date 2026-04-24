@@ -8,6 +8,93 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [currentId, setCurrentId] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [isSignup, setIsSignup] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [loadingAuth, setLoadingAuth] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const validate = () => {
+    const newErrors = {};
+
+    if (!email) {
+      newErrors.email = "Email is required";
+    } else if (!/\S+@\S+\.\S+/.test(email)) {
+      newErrors.email = "Invalid email format";
+    }
+
+    if (!password) {
+      newErrors.password = "Password is required";
+    } else if (password.length < 4) {
+      newErrors.password = "Password must be at least 4 characters";
+    }
+
+    setErrors(newErrors);
+
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const signup = async () => {
+    if (!validate()) return;
+
+    try {
+      setAuthError("");
+      setLoadingAuth(true);
+
+      const res = await fetch("http://localhost:5000/api/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password, name: "User" }),
+      });
+
+      const data = await res.json();
+
+      if (data.message) {
+        setAuthError("Account created! Please login.");
+        setIsSignup(false);
+      } else {
+        setAuthError(data.error);
+      }
+    } catch {
+      setAuthError("Something went wrong");
+    } finally {
+      setLoadingAuth(false);
+    }
+  };
+
+  const login = async () => {
+    if (!validate()) return;
+
+    try {
+      setAuthError("");
+      setLoadingAuth(true);
+
+      const res = await fetch("http://localhost:5000/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+        setToken(data.token);
+      } else {
+        setAuthError(data.error);
+      }
+    } catch {
+      setAuthError("Something went wrong");
+    } finally {
+      setLoadingAuth(false);
+    }
+  };
 
   const simulatePayment = async (status) => {
     if (!currentId) return;
@@ -17,6 +104,7 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ status }), // 🔥 send status
       });
@@ -26,20 +114,41 @@ function App() {
   };
 
   const fetchTransactions = async () => {
-    const res = await fetch("http://localhost:5000/api/transactions");
-    const data = await res.json();
-    setTransactions(data);
+    try {
+      if (!token) return; // 🔥 don't call API if not logged in
+
+      const res = await fetch("http://localhost:5000/api/transactions", {
+        headers: {
+          Authorization: `Bearer ${token}`, // 🔐 add token
+        },
+      });
+
+      // 🔥 handle unauthorized
+      if (res.status === 401 || res.status === 403) {
+        console.log("Unauthorized - logging out");
+        localStorage.removeItem("token");
+        setToken("");
+        return;
+      }
+
+      const data = await res.json();
+      setTransactions(data);
+    } catch (err) {
+      console.log("Fetch error:", err);
+    }
   };
 
   useEffect(() => {
+    if (!token) return; // 🔥 stop polling if not logged in
+
     fetchTransactions();
 
     const interval = setInterval(() => {
       fetchTransactions();
-    }, 1500); // every 1.5 seconds
+    }, 1500);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [token]); // 🔥 rerun when token changes
 
   const createPayment = async () => {
     setLoading(true);
@@ -48,7 +157,10 @@ function App() {
 
     const res = await fetch("http://localhost:5000/api/create-payment", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         amount,
         note: "Payment",
@@ -95,7 +207,82 @@ function App() {
         console.log(err);
       }
     }, 2000);
+
+    const logout = () => {
+      localStorage.removeItem("token");
+      setToken("");
+    };
   };
+
+  if (!token) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0f172a] to-[#020617] text-white">
+        <div className="bg-white/10 backdrop-blur-xl p-6 rounded-2xl w-80 space-y-4 border border-white/10">
+          <h2 className="text-2xl font-bold text-center">
+            {isSignup ? "Create Account" : "Login"}
+          </h2>
+
+          {/* EMAIL */}
+          <input
+            type="email"
+            placeholder="Email"
+            className={`w-full p-2 rounded bg-black/30 border ${
+              errors.email ? "border-red-500" : "border-white/20"
+            }`}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+
+          {errors.email && (
+            <p className="text-xs text-red-400">{errors.email}</p>
+          )}
+
+          {/* PASSWORD */}
+          <input
+            type="password"
+            placeholder="Password"
+            className={`w-full p-2 rounded bg-black/30 border ${
+              errors.password ? "border-red-500" : "border-white/20"
+            }`}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          {errors.password && (
+            <p className="text-xs text-red-400">{errors.password}</p>
+          )}
+
+          {authError && (
+            <p className="text-sm text-red-400 text-center">{authError}</p>
+          )}
+
+          {/* BUTTON */}
+          <button
+            onClick={isSignup ? signup : login}
+            disabled={!email || !password || loadingAuth}
+            className={`w-full p-2 rounded-lg font-semibold ${
+              !email || !password
+                ? "bg-gray-500 cursor-not-allowed"
+                : "bg-emerald-500 hover:bg-emerald-400 text-black"
+            }`}
+          >
+            {loadingAuth ? "Please wait..." : isSignup ? "Sign Up" : "Login"}
+          </button>
+
+          {/* TOGGLE */}
+          <p className="text-sm text-center text-gray-300">
+            {isSignup ? "Already have an account?" : "Don't have an account?"}
+            <span
+              onClick={() => setIsSignup(!isSignup)}
+              className="text-emerald-400 cursor-pointer ml-1"
+            >
+              {isSignup ? "Login" : "Sign Up"}
+            </span>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-black text-white p-6">
@@ -232,8 +419,10 @@ function App() {
                   <span
                     className={`text-xs px-3 py-1 rounded-full ${
                       t.status === "success"
-                        ? "bg-green-500/20 text-green-300" 
-                        : (t.status === "pending" ? "bg-yellow-500/20 text-yellow-300" : "bg-red-500/20 text-red-300")
+                        ? "bg-green-500/20 text-green-300"
+                        : t.status === "pending"
+                          ? "bg-yellow-500/20 text-yellow-300"
+                          : "bg-red-500/20 text-red-300"
                     }`}
                   >
                     {t.status}
@@ -242,6 +431,13 @@ function App() {
               ))}
             </div>
           </motion.div>
+
+          <button
+            onClick={logout}
+            className="absolute top-5 right-5 bg-red-500 px-3 py-1 rounded"
+          >
+            Logout
+          </button>
         </div>
       </div>
     </div>
