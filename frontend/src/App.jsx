@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState } from "react";
+
+const API_BASE_URL = "http://localhost:5000/api";
 
 function App() {
   const [amount, setAmount] = useState("");
@@ -32,8 +34,16 @@ function App() {
     }
 
     setErrors(newErrors);
-
     return Object.keys(newErrors).length === 0;
+  };
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    setToken("");
+    setTransactions([]);
+    setCurrentId("");
+    setQr("");
+    setStatus("");
   };
 
   const signup = async () => {
@@ -43,7 +53,7 @@ function App() {
       setAuthError("");
       setLoadingAuth(true);
 
-      const res = await fetch("http://localhost:5000/api/signup", {
+      const res = await fetch(`${API_BASE_URL}/signup`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -53,11 +63,11 @@ function App() {
 
       const data = await res.json();
 
-      if (data.message) {
+      if (res.ok) {
         setAuthError("Account created! Please login.");
         setIsSignup(false);
       } else {
-        setAuthError(data.error);
+        setAuthError(data.error || "Unable to create account");
       }
     } catch {
       setAuthError("Something went wrong");
@@ -73,7 +83,7 @@ function App() {
       setAuthError("");
       setLoadingAuth(true);
 
-      const res = await fetch("http://localhost:5000/api/login", {
+      const res = await fetch(`${API_BASE_URL}/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -83,11 +93,11 @@ function App() {
 
       const data = await res.json();
 
-      if (data.token) {
+      if (res.ok && data.token) {
         localStorage.setItem("token", data.token);
         setToken(data.token);
       } else {
-        setAuthError(data.error);
+        setAuthError(data.error || "Unable to login");
       }
     } catch {
       setAuthError("Something went wrong");
@@ -96,97 +106,133 @@ function App() {
     }
   };
 
-  const simulatePayment = async (status) => {
+  const fetchTransactions = async (authToken) => {
+    if (!authToken) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/transactions`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        logout();
+        return;
+      }
+
+      const data = await res.json();
+      setTransactions(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Fetch error:", err);
+    }
+  };
+
+  const simulatePayment = async (nextStatus) => {
     if (!currentId) return;
 
     try {
-      await fetch(`http://localhost:5000/api/simulate/${currentId}`, {
+      await fetch(`${API_BASE_URL}/simulate/${currentId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ status }), // 🔥 send status
+        body: JSON.stringify({ status: nextStatus }),
       });
     } catch (err) {
-      console.log(err);
-    }
-  };
-
-  const fetchTransactions = async () => {
-    try {
-      if (!token) return; // 🔥 don't call API if not logged in
-
-      const res = await fetch("http://localhost:5000/api/transactions", {
-        headers: {
-          Authorization: `Bearer ${token}`, // 🔐 add token
-        },
-      });
-
-      // 🔥 handle unauthorized
-      if (res.status === 401 || res.status === 403) {
-        console.log("Unauthorized - logging out");
-        localStorage.removeItem("token");
-        setToken("");
-        return;
-      }
-
-      const data = await res.json();
-      setTransactions(data);
-    } catch (err) {
-      console.log("Fetch error:", err);
+      console.error(err);
     }
   };
 
   useEffect(() => {
-    if (!token) return; // 🔥 stop polling if not logged in
+    if (!token) return undefined;
 
-    fetchTransactions();
+    const loadTransactions = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/transactions`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-    const interval = setInterval(() => {
-      fetchTransactions();
-    }, 1500);
+        if (res.status === 401 || res.status === 403) {
+          logout();
+          return;
+        }
 
-    return () => clearInterval(interval);
-  }, [token]); // 🔥 rerun when token changes
+        const data = await res.json();
+        setTransactions(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("Fetch error:", err);
+      }
+    };
+
+    const initialTimeout = setTimeout(loadTransactions, 0);
+    const interval = setInterval(loadTransactions, 1500);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [token]);
 
   const createPayment = async () => {
-    setLoading(true);
-    setStatus("pending");
-    setQr("");
+    if (!amount || !token) return;
 
-    const res = await fetch("http://localhost:5000/api/create-payment", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        amount,
-        note: "Payment",
-        upiId: "test@upi",
-      }),
-    });
+    try {
+      setLoading(true);
+      setStatus("pending");
+      setQr("");
 
-    const data = await res.json();
-    setQr(data.qrCode);
-    setCurrentId(data.transaction._id);
-    pollStatus(data.transaction._id);
-    setLoading(false);
+      const res = await fetch(`${API_BASE_URL}/create-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          amount,
+          note: "Payment",
+          upiId: "test@upi",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Unable to create payment");
+      }
+
+      setQr(data.qrCode || "");
+      setCurrentId(data.transaction?._id || "");
+
+      if (data.transaction?._id) {
+        pollStatus(data.transaction._id);
+      }
+    } catch (err) {
+      setStatus("failed");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const pollStatus = (id) => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/transaction/${id}`);
+        const res = await fetch(`${API_BASE_URL}/transaction/${id}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
         const data = await res.json();
 
         if (data.status === "success") {
           setStatus("success");
-          fetchTransactions();
+          void fetchTransactions(token);
           clearInterval(interval);
 
-          // Auto close QR after success
           setTimeout(() => {
             setQr("");
             setStatus("");
@@ -204,14 +250,10 @@ function App() {
           setStatus("pending");
         }
       } catch (err) {
-        console.log(err);
+        console.error(err);
+        clearInterval(interval);
       }
     }, 2000);
-
-    const logout = () => {
-      localStorage.removeItem("token");
-      setToken("");
-    };
   };
 
   if (!token) {
@@ -222,7 +264,6 @@ function App() {
             {isSignup ? "Create Account" : "Login"}
           </h2>
 
-          {/* EMAIL */}
           <input
             type="email"
             placeholder="Email"
@@ -230,14 +271,13 @@ function App() {
               errors.email ? "border-red-500" : "border-white/20"
             }`}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(event) => setEmail(event.target.value)}
           />
 
           {errors.email && (
             <p className="text-xs text-red-400">{errors.email}</p>
           )}
 
-          {/* PASSWORD */}
           <input
             type="password"
             placeholder="Password"
@@ -245,7 +285,7 @@ function App() {
               errors.password ? "border-red-500" : "border-white/20"
             }`}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
           />
 
           {errors.password && (
@@ -256,7 +296,6 @@ function App() {
             <p className="text-sm text-red-400 text-center">{authError}</p>
           )}
 
-          {/* BUTTON */}
           <button
             onClick={isSignup ? signup : login}
             disabled={!email || !password || loadingAuth}
@@ -269,11 +308,10 @@ function App() {
             {loadingAuth ? "Please wait..." : isSignup ? "Sign Up" : "Login"}
           </button>
 
-          {/* TOGGLE */}
           <p className="text-sm text-center text-gray-300">
             {isSignup ? "Already have an account?" : "Don't have an account?"}
             <span
-              onClick={() => setIsSignup(!isSignup)}
+              onClick={() => setIsSignup((currentValue) => !currentValue)}
               className="text-emerald-400 cursor-pointer ml-1"
             >
               {isSignup ? "Login" : "Sign Up"}
@@ -287,23 +325,27 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-black text-white p-6">
       <div className="max-w-5xl mx-auto">
-        {/* HEADER */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-10"
         >
           <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-teal-300 text-transparent bg-clip-text">
-            💳 Smart UPI Billing
+            Smart UPI Billing
           </h1>
           <p className="text-gray-400 mt-2">
-            Instant QR payments + live tracking
+            Instant QR payments with live tracking
           </p>
         </motion.div>
 
-        {/* GRID */}
+        <button
+          onClick={logout}
+          className="ml-auto mb-6 block bg-red-500 hover:bg-red-400 text-white px-4 py-2 rounded-lg"
+        >
+          Logout
+        </button>
+
         <div className="grid md:grid-cols-2 gap-6">
-          {/* PAYMENT CARD */}
           <motion.div
             initial={{ opacity: 0, x: -40 }}
             animate={{ opacity: 1, x: 0 }}
@@ -315,13 +357,13 @@ function App() {
               type="number"
               placeholder="Enter amount"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(event) => setAmount(event.target.value)}
               className="w-full p-3 rounded-lg bg-black/40 border border-white/20 text-white placeholder-gray-400 focus:border-emerald-400 outline-none mb-4"
             />
 
             <button
               onClick={createPayment}
-              disabled={status === "pending"}
+              disabled={loading || status === "pending"}
               className="w-full bg-emerald-500 disabled:opacity-50 hover:bg-emerald-400 text-black font-semibold p-3 rounded-lg"
             >
               Generate QR
@@ -343,7 +385,7 @@ function App() {
                   className="mt-6 flex justify-center"
                 >
                   <div className="bg-white p-3 rounded-xl">
-                    <img src={qr} className="w-40" />
+                    <img src={qr} alt="Generated payment QR code" className="w-40" />
                   </div>
                 </motion.div>
               )}
@@ -354,14 +396,14 @@ function App() {
                     onClick={() => simulatePayment("success")}
                     className="w-full bg-green-500 hover:bg-green-400 text-black p-2 rounded-lg"
                   >
-                    ✅ Simulate Success
+                    Simulate Success
                   </button>
 
                   <button
                     onClick={() => simulatePayment("failed")}
                     className="w-full bg-red-500 hover:bg-red-400 text-white p-2 rounded-lg"
                   >
-                    ❌ Simulate Failure
+                    Simulate Failure
                   </button>
                 </div>
               )}
@@ -382,13 +424,13 @@ function App() {
 
               {status === "success" && (
                 <div className="text-green-400 font-semibold text-lg">
-                  ✅ Payment Successful
+                  Payment Successful
                 </div>
               )}
 
               {status === "failed" && (
                 <div className="text-red-400 font-semibold text-lg">
-                  ❌ Payment Failed
+                  Payment Failed
                 </div>
               )}
 
@@ -396,48 +438,40 @@ function App() {
             </motion.div>
           </motion.div>
 
-          {/* TRANSACTIONS */}
           <motion.div
             initial={{ opacity: 0, x: 40 }}
             animate={{ opacity: 1, x: 0 }}
             className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-xl"
           >
-            <h2 className="text-xl font-semibold mb-4">📊 Transactions</h2>
+            <h2 className="text-xl font-semibold mb-4">Transactions</h2>
 
             <div className="space-y-3 max-h-[400px] overflow-y-auto">
-              {transactions.map((t) => (
+              {transactions.map((transaction) => (
                 <motion.div
-                  key={t._id}
+                  key={transaction._id}
                   whileHover={{ scale: 1.02 }}
                   className="flex justify-between items-center bg-black/40 p-3 rounded-lg"
                 >
                   <div>
-                    <p className="font-semibold">₹{t.amount}</p>
-                    <p className="text-sm text-gray-400">{t.note}</p>
+                    <p className="font-semibold">Rs. {transaction.amount}</p>
+                    <p className="text-sm text-gray-400">{transaction.note}</p>
                   </div>
 
                   <span
                     className={`text-xs px-3 py-1 rounded-full ${
-                      t.status === "success"
+                      transaction.status === "success"
                         ? "bg-green-500/20 text-green-300"
-                        : t.status === "pending"
+                        : transaction.status === "pending"
                           ? "bg-yellow-500/20 text-yellow-300"
                           : "bg-red-500/20 text-red-300"
                     }`}
                   >
-                    {t.status}
+                    {transaction.status}
                   </span>
                 </motion.div>
               ))}
             </div>
           </motion.div>
-
-          <button
-            onClick={logout}
-            className="absolute top-5 right-5 bg-red-500 px-3 py-1 rounded"
-          >
-            Logout
-          </button>
         </div>
       </div>
     </div>

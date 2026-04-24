@@ -1,17 +1,18 @@
 require("dotenv").config({ path: "./.env" });
 
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const Transaction = require("./models/Transaction");
 const bcrypt = require("bcryptjs");
+const cors = require("cors");
+const express = require("express");
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+
+const Transaction = require("./models/Transaction");
 const User = require("./models/User");
 
 const app = express();
+const PORT = process.env.PORT || 5000;
 
-// Middleware
 app.use(express.json());
-
 app.use(
   cors({
     origin: "http://localhost:5173",
@@ -19,9 +20,6 @@ app.use(
     credentials: true,
   }),
 );
-
-// 🔐 AUTH MIDDLEWARE
-const jwt = require("jsonwebtoken");
 
 const authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -31,133 +29,158 @@ const authMiddleware = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    return next();
+  } catch {
     return res.status(403).json({ error: "Invalid token" });
   }
 };
 
-// Routes
-const authRoutes = require("./routes/authRoutes");
-const transactionRoutes = require("./routes/transactionRoutes");
-
-app.use("/api/auth", authRoutes);
-app.use(express.json());
-app.use("/api", transactionRoutes);
-
-// Test route
-app.get("/", (req, res) => {
-  res.send("API is running 🚀");
+app.get("/", (_req, res) => {
+  res.send("API is running");
 });
 
-// ✅ Connect DB FIRST, then start server
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    console.log("MongoDB Connected ✅");
-
-    app.listen(5000, () => {
-      console.log("Server running on port 5000 🚀");
-    });
-  })
-  .catch((err) => {
-    console.log("MongoDB Error ❌:", err.message);
-  });
-
-app.post("/api/simulate/:id", async (req, res) => {
+app.post("/api/signup", async (req, res) => {
   try {
-    const { status } = req.body; // "success" or "failed"
-    const id = req.params.id;
+    const { name, email, password } = req.body;
 
-    if (!status) {
-      return res.status(400).json({ error: "Status required" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
-    const txn = await Transaction.findById(id);
+    const existingUser = await User.findOne({ email });
 
-    if (!txn) {
-      return res.status(404).json({ error: "Transaction not found" });
+    if (existingUser) {
+      return res.status(409).json({ error: "User already exists" });
     }
 
-    txn.status = status; // 🔥 dynamic update
-    await txn.save();
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    res.json({ message: `Payment marked as ${status}`, txn });
+    await User.create({
+      name: name || "User",
+      email,
+      password: hashedPassword,
+    });
+
+    return res.json({ message: "Account created successfully" });
   } catch (err) {
-    console.error("SIMULATE ERROR:", err);
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
-// 🔐 LOGIN ROUTE
 app.post("/api/login", async (req, res) => {
-  console.log("BODY:", req.body);
   try {
-    console.log("LOGIN API HIT");
-
     const { email, password } = req.body;
 
-    // 🔍 find user
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+
     const user = await User.findOne({ email });
-    console.log("User:", user);
 
     if (!user) {
       return res.status(400).json({ error: "Email not found" });
     }
 
-    // 🔐 compare password
     const isMatch = await bcrypt.compare(password, user.password);
-    console.log("Password match:", isMatch);
 
     if (!isMatch) {
       return res.status(400).json({ error: "Incorrect password" });
     }
 
-    // 🎟️ token
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET
-    );
-
-    res.json({ token });
-
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+    return res.json({ token });
   } catch (err) {
-    console.log("FULL ERROR:", err); // 🔥 THIS WILL SHOW REAL PROBLEM
-    res.status(500).json({ error: "Server error" });
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 });
 
 app.post("/api/create-payment", authMiddleware, async (req, res) => {
-  const { amount } = req.body;
+  try {
+    const { amount, note, upiId } = req.body;
 
-  const txn = await Transaction.create({
-    amount,
-    status: "pending",
-    user: req.user.id, // 🔥 attach user
-  });
+    const transaction = await Transaction.create({
+      amount,
+      note,
+      upiId,
+      status: "pending",
+      user: req.user.id,
+    });
 
-  res.json({
-    transaction: txn,
-    qrCode: "https://api.qrserver.com/v1/create-qr-code/?data=demo",
-  });
+    return res.json({
+      transaction,
+      qrCode: "https://api.qrserver.com/v1/create-qr-code/?data=demo",
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
 });
 
 app.get("/api/transactions", authMiddleware, async (req, res) => {
-  const txns = await Transaction.find({ user: req.user.id });
-  res.json(txns);
+  try {
+    const transactions = await Transaction.find({ user: req.user.id }).sort({
+      createdAt: -1,
+    });
+
+    return res.json(transactions);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+app.get("/api/transaction/:id", authMiddleware, async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    return res.json(transaction);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
 });
 
 app.post("/api/simulate/:id", authMiddleware, async (req, res) => {
-  const { status } = req.body;
+  try {
+    const { status } = req.body;
 
-  const txn = await Transaction.findById(req.params.id);
+    if (!status) {
+      return res.status(400).json({ error: "Status required" });
+    }
 
-  txn.status = status;
-  await txn.save();
+    const transaction = await Transaction.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
 
-  res.json(txn);
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    transaction.status = status;
+    await transaction.save();
+
+    return res.json({
+      message: `Payment marked as ${status}`,
+      transaction,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
 });
 
-app.listen(5000, () => console.log("Server running on 5000"));
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("MongoDB connection failed:", err.message);
+  });
