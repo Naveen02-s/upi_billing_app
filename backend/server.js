@@ -2,24 +2,126 @@ require("dotenv").config({ path: "./.env" });
 
 const bcrypt = require("bcryptjs");
 const cors = require("cors");
+const crypto = require("crypto");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const QRCode = require("qrcode");
 
 const Transaction = require("./models/Transaction");
 const User = require("./models/User");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const FRONTEND_URLS = [
+  process.env.FRONTEND_URL,
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+].filter(Boolean);
+const UPI_ID_PATTERN = /^[A-Za-z0-9._-]{2,256}@[A-Za-z]{2,64}$/;
 
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin(origin, callback) {
+      if (!origin || FRONTEND_URLS.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("CORS blocked"));
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   }),
 );
+
+const roundAmount = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+const createReference = (prefix) => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
+
+  return `${prefix}-${timestamp}-${random}`;
+};
+
+const normalizeStatus = (value) => {
+  const normalizedValue = String(value || "").trim().toLowerCase();
+
+  if (["paid", "success", "captured", "done", "completed"].includes(normalizedValue)) {
+    return "paid";
+  }
+
+  if (["failed", "failure", "error", "rejected"].includes(normalizedValue)) {
+    return "failed";
+  }
+
+  if (["expired", "timeout"].includes(normalizedValue)) {
+    return "expired";
+  }
+
+  return "pending";
+};
+
+const buildPaymentNote = ({ invoiceNumber, note, customerName }) => {
+  const parts = [invoiceNumber];
+
+  if (note) {
+    parts.push(note);
+  } else if (customerName) {
+    parts.push(customerName);
+  }
+
+  return parts.join(" | ").slice(0, 80);
+};
+
+const buildUpiUrl = ({ upiId, merchantName, amount, note, reference }) => {
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: merchantName || "Merchant",
+    am: amount.toFixed(2),
+    cu: "INR",
+    tr: reference,
+    tn: note,
+  });
+
+  return `upi://pay?${params.toString()}`;
+};
+
+const parseAmount = (value) => {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return null;
+  }
+
+  return roundAmount(numericValue);
+};
+
+const parseItems = (items) => {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .map((item) => {
+      const name = String(item?.name || "").trim();
+      const quantity = Number(item?.quantity);
+      const price = Number(item?.price);
+
+      if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price < 0) {
+        return null;
+      }
+
+      return {
+        name,
+        quantity,
+        price: roundAmount(price),
+        total: roundAmount(quantity * price),
+      };
+    })
+    .filter(Boolean);
+};
 
 const authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -97,19 +199,62 @@ app.post("/api/login", async (req, res) => {
 
 app.post("/api/create-payment", authMiddleware, async (req, res) => {
   try {
-    const { amount, note, upiId } = req.body;
+    const merchantName = String(req.body.merchantName || "Merchant").trim() || "Merchant";
+    const customerName = String(req.body.customerName || "").trim();
+    const note = String(req.body.note || "").trim();
+    const upiId = String(req.body.upiId || "").trim();
+    const items = parseItems(req.body.items);
+    const requestedAmount = parseAmount(req.body.amount);
+
+    if (!UPI_ID_PATTERN.test(upiId)) {
+      return res.status(400).json({ error: "Enter a valid UPI ID" });
+    }
+
+    const amount = items.length
+      ? roundAmount(items.reduce((sum, item) => sum + item.total, 0))
+      : requestedAmount;
+
+    if (!amount) {
+      return res.status(400).json({ error: "Enter an amount greater than zero" });
+    }
+
+    const invoiceNumber = createReference("INV");
+    const transactionReference = createReference("UPI");
+    const paymentNote = buildPaymentNote({ invoiceNumber, note, customerName });
+    const upiUrl = buildUpiUrl({
+      upiId,
+      merchantName,
+      amount,
+      note: paymentNote,
+      reference: transactionReference,
+    });
+    const qrCode = await QRCode.toDataURL(upiUrl, {
+      width: 360,
+      margin: 1,
+      color: {
+        dark: "#10223a",
+        light: "#ffffff",
+      },
+    });
 
     const transaction = await Transaction.create({
       amount,
-      note,
+      note: paymentNote,
       upiId,
+      merchantName,
+      customerName,
+      invoiceNumber,
+      transactionReference,
+      paymentUri: upiUrl,
+      items,
       status: "pending",
       user: req.user.id,
     });
 
     return res.json({
       transaction,
-      qrCode: "https://api.qrserver.com/v1/create-qr-code/?data=demo",
+      qrCode,
+      upiUrl,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message || "Server error" });
@@ -145,14 +290,102 @@ app.get("/api/transaction/:id", authMiddleware, async (req, res) => {
   }
 });
 
-app.post("/api/simulate/:id", authMiddleware, async (req, res) => {
+app.get("/api/transaction/:id/qr", authMiddleware, async (req, res) => {
   try {
-    const { status } = req.body;
+    const transaction = await Transaction.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
 
-    if (!status) {
-      return res.status(400).json({ error: "Status required" });
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
     }
 
+    if (!transaction.paymentUri) {
+      return res.status(400).json({ error: "QR is not available for this transaction" });
+    }
+
+    const qrCode = await QRCode.toDataURL(transaction.paymentUri, {
+      width: 360,
+      margin: 1,
+      color: {
+        dark: "#10223a",
+        light: "#ffffff",
+      },
+    });
+
+    return res.json({
+      qrCode,
+      upiUrl: transaction.paymentUri,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+app.post("/api/payment-webhook", async (req, res) => {
+  try {
+    if (process.env.WEBHOOK_SECRET) {
+      const suppliedSecret = req.headers["x-webhook-secret"];
+
+      if (suppliedSecret !== process.env.WEBHOOK_SECRET) {
+        return res.status(401).json({ error: "Invalid webhook secret" });
+      }
+    }
+
+    const providerEvent = String(req.body.providerEvent || req.body.event || "").trim();
+    const paymentEntity = req.body.payload?.payment?.entity || req.body.payload?.order?.entity || {};
+    const notes = paymentEntity.notes || req.body.notes || {};
+    const transactionId = req.body.transactionId || notes.transactionId;
+    const transactionReference =
+      req.body.transactionReference ||
+      req.body.reference ||
+      notes.transactionReference ||
+      paymentEntity.reference;
+    const providerPaymentId =
+      req.body.providerPaymentId || req.body.paymentId || paymentEntity.id || "";
+    const status = normalizeStatus(req.body.status || paymentEntity.status || providerEvent);
+
+    if (!transactionId && !transactionReference) {
+      return res.status(400).json({
+        error: "transactionId or transactionReference is required",
+      });
+    }
+
+    const query = transactionId
+      ? { _id: transactionId }
+      : { transactionReference };
+
+    const updates = {
+      status,
+      providerEvent: providerEvent || undefined,
+      providerPaymentId: providerPaymentId || undefined,
+    };
+
+    if (status === "paid") {
+      updates.paidAt = new Date();
+    }
+
+    const transaction = await Transaction.findOneAndUpdate(query, updates, {
+      new: true,
+    });
+
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    return res.json({
+      received: true,
+      transaction,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+app.post("/api/simulate/:id", authMiddleware, async (req, res) => {
+  try {
+    const status = normalizeStatus(req.body.status);
     const transaction = await Transaction.findOne({
       _id: req.params.id,
       user: req.user.id,
@@ -163,6 +396,12 @@ app.post("/api/simulate/:id", authMiddleware, async (req, res) => {
     }
 
     transaction.status = status;
+
+    if (status === "paid") {
+      transaction.paidAt = new Date();
+      transaction.providerEvent = "manual.simulation";
+    }
+
     await transaction.save();
 
     return res.json({
