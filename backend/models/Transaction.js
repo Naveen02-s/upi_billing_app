@@ -67,11 +67,35 @@ const transactionSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  razorpay_order_id: {
+    type: String,
+    trim: true,
+    index: true,
+    unique: true,
+    sparse: true,
+  },
+  razorpay_payment_id: {
+    type: String,
+    trim: true,
+  },
+  razorpay_signature: {
+    type: String,
+    trim: true,
+  },
+  failureReason: {
+    type: String,
+    trim: true,
+  },
   providerEvent: {
     type: String,
     trim: true,
   },
   paidAt: Date,
+  failedAt: Date,
+  webhookEventIds: {
+    type: [String],
+    default: [],
+  },
   items: {
     type: [itemSchema],
     default: [],
@@ -82,6 +106,7 @@ const transactionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
+    enum: ["pending", "paid", "failed", "expired"],
     default: "pending",
   },
 }, { timestamps: true });

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
@@ -16,6 +16,20 @@ const normalizeStatus = (value) => {
   if (["failed", "error"].includes(v)) return "failed";
   return "pending";
 };
+
+const loadRazorpayScript = () =>
+  new Promise((resolve, reject) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => reject(new Error("Unable to load Razorpay checkout"));
+    document.body.appendChild(script);
+  });
 
 // ✅ EXTRACTED COMPONENT
 const TransactionsList = ({ transactions }) => {
@@ -84,13 +98,9 @@ export default function App() {
     localStorage.setItem("upiId", upiId);
   }, [upiId]);
 
-  useEffect(() => {
-    if (token) {
-      fetchTransactions();
-    }
-  }, [token]);
+  const fetchTransactions = useCallback(async () => {
+    if (!token) return;
 
-  const fetchTransactions = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/transactions`, {
         headers: {
@@ -102,7 +112,20 @@ export default function App() {
     } catch (err) {
       console.log(err);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    if (token) {
+      fetchTransactions();
+    }
+  }, [fetchTransactions, token]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const interval = setInterval(fetchTransactions, 5000);
+    return () => clearInterval(interval);
+  }, [fetchTransactions, token]);
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -152,17 +175,47 @@ export default function App() {
     if (!merchantName || !upiId || !amount) return;
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE_URL}/create-payment`, {
+      const res = await fetch(`${API_BASE_URL}/create-order`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ merchantName, upiId, amount }),
+        body: JSON.stringify({ merchantName, upiId, amount, customerName }),
       });
       const data = await res.json();
-      setQr(data.qrCode);
-      setUpiUrl(data.upiUrl);
+      if (!res.ok) throw new Error(data.error || "Could not create order");
+
+      setQr("");
+      setUpiUrl("");
+      await loadRazorpayScript();
+
+      const razorpay = new window.Razorpay({
+        key: data.key,
+        amount: data.order.amount,
+        currency: data.order.currency,
+        name: merchantName,
+        description: "UPI Billing Payment",
+        order_id: data.order.id,
+        prefill: {
+          name: customerName,
+        },
+        notes: {
+          merchantName,
+          upiId,
+          transactionId: data.transaction?._id,
+        },
+        handler: () => {
+          fetchTransactions();
+        },
+        modal: {
+          ondismiss: () => {
+            fetchTransactions();
+          },
+        },
+      });
+
+      razorpay.open();
       fetchTransactions();
     } finally {
       setLoading(false);

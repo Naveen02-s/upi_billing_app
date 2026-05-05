@@ -10,6 +10,8 @@ const QRCode = require("qrcode");
 
 const Transaction = require("./models/Transaction");
 const User = require("./models/User");
+const paymentRoutes = require("./routes/payment");
+const webhookRoutes = require("./routes/webhook");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,6 +22,7 @@ const FRONTEND_URLS = [
 ].filter(Boolean);
 const UPI_ID_PATTERN = /^[A-Za-z0-9._-]{2,256}@[A-Za-z]{2,64}$/;
 
+app.use("/api/webhook", express.raw({ type: "application/json" }), webhookRoutes);
 app.use(express.json());
 app.use(
   cors({
@@ -35,6 +38,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use("/api", paymentRoutes);
 
 const roundAmount = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
