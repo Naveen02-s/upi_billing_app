@@ -1,6 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const QRCode = require("qrcode");
 const Razorpay = require("razorpay");
 
 const Transaction = require("../models/Transaction");
@@ -54,14 +55,14 @@ const parseAmount = (value) => {
 
 const toPaise = (amount) => Math.round(amount * 100);
 
-const createReceipt = () => {
+const createReference = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = crypto.randomBytes(3).toString("hex").toUpperCase();
 
-  return `RZP-${timestamp}-${random}`.slice(0, 40);
+  return `PLINK-${timestamp}-${random}`.slice(0, 40);
 };
 
-router.post("/create-order", authMiddleware, async (req, res) => {
+router.post("/create-payment", authMiddleware, async (req, res) => {
   try {
     const amount = parseAmount(req.body.amount);
     const merchantName = String(req.body.merchantName || "Merchant").trim() || "Merchant";
@@ -77,16 +78,29 @@ router.post("/create-order", authMiddleware, async (req, res) => {
     }
 
     const razorpay = getRazorpay();
-    const receipt = createReceipt();
-    const order = await razorpay.orders.create({
+    const referenceId = createReference();
+    const description = `UPI Billing payment for ${merchantName}`;
+    const paymentLink = await razorpay.paymentLink.create({
       amount: toPaise(amount),
       currency: "INR",
-      receipt,
+      description,
+      reference_id: referenceId,
+      customer: customerName ? { name: customerName } : undefined,
       notes: {
         merchantName,
         upiId,
         customerName,
+        referenceId,
         userId: req.user.id,
+      },
+    });
+    const paymentLinkUrl = paymentLink.short_url;
+    const qrCode = await QRCode.toDataURL(paymentLinkUrl, {
+      width: 360,
+      margin: 1,
+      color: {
+        dark: "#10223a",
+        light: "#ffffff",
       },
     });
 
@@ -96,20 +110,22 @@ router.post("/create-order", authMiddleware, async (req, res) => {
       upiId,
       customerName,
       status: "pending",
-      razorpay_order_id: order.id,
-      transactionReference: receipt,
-      providerEvent: "order.created",
+      razorpayPaymentLinkId: paymentLink.id,
+      paymentLinkUrl,
+      paymentUri: paymentLinkUrl,
+      transactionReference: referenceId,
+      providerEvent: "payment_link.created",
       user: req.user.id,
     });
 
     return res.status(201).json({
-      key: process.env.RAZORPAY_KEY_ID,
-      order,
       transaction,
-      razorpay_order_id: order.id,
+      qrCode,
+      paymentLinkUrl,
+      razorpayPaymentLinkId: paymentLink.id,
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Could not create Razorpay order" });
+    return res.status(500).json({ error: err.message || "Could not create Razorpay payment link" });
   }
 });
 

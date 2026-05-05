@@ -32,18 +32,25 @@ const verifyWebhookSignature = (rawBody, signature) => {
 };
 
 const getPaymentEntity = (body) => body.payload?.payment?.entity || {};
+const getPaymentLinkEntity = (body) => body.payload?.payment_link?.entity || {};
 
-const applyPaymentUpdate = async ({ event, eventId, payment }) => {
-  const orderId = payment.order_id;
+const getPaymentLinkId = ({ payment, paymentLink }) =>
+  paymentLink.id ||
+  payment.notes?.razorpayPaymentLinkId ||
+  payment.notes?.paymentLinkId ||
+  payment.invoice_id;
 
-  if (!orderId) {
-    return { ignored: true, reason: "Payment does not belong to a Razorpay order" };
+const applyPaymentUpdate = async ({ event, eventId, payment, paymentLink }) => {
+  const paymentLinkId = getPaymentLinkId({ payment, paymentLink });
+
+  if (!paymentLinkId) {
+    return { ignored: true, reason: "Payment does not belong to a Razorpay Payment Link" };
   }
 
-  if (event === "payment.captured") {
+  if (event === "payment_link.paid") {
     const transaction = await Transaction.findOneAndUpdate(
       {
-        razorpay_order_id: orderId,
+        razorpayPaymentLinkId: paymentLinkId,
         status: { $ne: "paid" },
         ...(eventId ? { webhookEventIds: { $ne: eventId } } : {}),
       },
@@ -54,6 +61,8 @@ const applyPaymentUpdate = async ({ event, eventId, payment }) => {
           providerEvent: event,
           providerPaymentId: payment.id,
           razorpay_payment_id: payment.id,
+          paymentLinkUrl: paymentLink.short_url,
+          paymentUri: paymentLink.short_url,
         },
         ...(eventId ? { $addToSet: { webhookEventIds: eventId } } : {}),
       },
@@ -68,7 +77,7 @@ const applyPaymentUpdate = async ({ event, eventId, payment }) => {
   if (event === "payment.failed") {
     const transaction = await Transaction.findOneAndUpdate(
       {
-        razorpay_order_id: orderId,
+        razorpayPaymentLinkId: paymentLinkId,
         status: { $nin: ["paid", "failed"] },
         ...(eventId ? { webhookEventIds: { $ne: eventId } } : {}),
       },
@@ -91,16 +100,16 @@ const applyPaymentUpdate = async ({ event, eventId, payment }) => {
     }
   }
 
-  const transaction = await Transaction.findOne({ razorpay_order_id: orderId });
+  const transaction = await Transaction.findOne({ razorpayPaymentLinkId: paymentLinkId });
 
   if (!transaction) {
-    return { ignored: true, reason: "Transaction not found for Razorpay order" };
+    return { ignored: true, reason: "Transaction not found for Razorpay Payment Link" };
   }
 
   return { duplicate: true, transaction };
 };
 
-router.post("/", async (req, res) => {
+router.post("/razorpay", async (req, res) => {
   try {
     const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
     const signature = req.headers["x-razorpay-signature"];
@@ -113,7 +122,7 @@ router.post("/", async (req, res) => {
     const event = body.event;
     const eventId = req.headers["x-razorpay-event-id"];
 
-    if (!["payment.captured", "payment.failed"].includes(event)) {
+    if (!["payment_link.paid", "payment.failed"].includes(event)) {
       return res.json({ received: true, ignored: true });
     }
 
@@ -121,6 +130,7 @@ router.post("/", async (req, res) => {
       event,
       eventId,
       payment: getPaymentEntity(body),
+      paymentLink: getPaymentLinkEntity(body),
     });
 
     return res.json({

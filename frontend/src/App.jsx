@@ -17,20 +17,6 @@ const normalizeStatus = (value) => {
   return "pending";
 };
 
-const loadRazorpayScript = () =>
-  new Promise((resolve, reject) => {
-    if (window.Razorpay) {
-      resolve(true);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => reject(new Error("Unable to load Razorpay checkout"));
-    document.body.appendChild(script);
-  });
-
 // ✅ EXTRACTED COMPONENT
 const TransactionsList = ({ transactions }) => {
   if (transactions.length === 0) {
@@ -83,6 +69,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [copyState, setCopyState] = useState("");
   const [transactions, setTransactions] = useState([]);
+  const [activeTransactionId, setActiveTransactionId] = useState("");
 
   const [upiSuggestions, setUpiSuggestions] = useState(
     JSON.parse(localStorage.getItem("upiSuggestions")) || []
@@ -108,9 +95,12 @@ export default function App() {
         },
       });
       const data = await res.json();
-      setTransactions(Array.isArray(data) ? data : []);
+      const nextTransactions = Array.isArray(data) ? data : [];
+      setTransactions(nextTransactions);
+      return nextTransactions;
     } catch (err) {
       console.log(err);
+      return [];
     }
   }, [token]);
 
@@ -121,11 +111,20 @@ export default function App() {
   }, [fetchTransactions, token]);
 
   useEffect(() => {
-    if (!token) return undefined;
+    if (!token || !activeTransactionId) return undefined;
 
-    const interval = setInterval(fetchTransactions, 5000);
+    const interval = setInterval(async () => {
+      const nextTransactions = await fetchTransactions();
+      const activeTransaction = nextTransactions.find(
+        (txn) => txn._id === activeTransactionId || txn.id === activeTransactionId
+      );
+
+      if (activeTransaction && normalizeStatus(activeTransaction.status) !== "pending") {
+        setActiveTransactionId("");
+      }
+    }, 4000);
     return () => clearInterval(interval);
-  }, [fetchTransactions, token]);
+  }, [activeTransactionId, fetchTransactions, token]);
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -175,7 +174,7 @@ export default function App() {
     if (!merchantName || !upiId || !amount) return;
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE_URL}/create-order`, {
+      const res = await fetch(`${API_BASE_URL}/create-payment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -184,38 +183,11 @@ export default function App() {
         body: JSON.stringify({ merchantName, upiId, amount, customerName }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not create order");
+      if (!res.ok) throw new Error(data.error || "Could not create payment");
 
-      setQr("");
-      setUpiUrl("");
-      await loadRazorpayScript();
-
-      const razorpay = new window.Razorpay({
-        key: data.key,
-        amount: data.order.amount,
-        currency: data.order.currency,
-        name: merchantName,
-        description: "UPI Billing Payment",
-        order_id: data.order.id,
-        prefill: {
-          name: customerName,
-        },
-        notes: {
-          merchantName,
-          upiId,
-          transactionId: data.transaction?._id,
-        },
-        handler: () => {
-          fetchTransactions();
-        },
-        modal: {
-          ondismiss: () => {
-            fetchTransactions();
-          },
-        },
-      });
-
-      razorpay.open();
+      setQr(data.qrCode);
+      setUpiUrl(data.paymentLinkUrl);
+      setActiveTransactionId(data.transaction?._id || "");
       fetchTransactions();
     } finally {
       setLoading(false);

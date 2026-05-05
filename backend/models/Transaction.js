@@ -74,6 +74,17 @@ const transactionSchema = new mongoose.Schema({
     unique: true,
     sparse: true,
   },
+  razorpayPaymentLinkId: {
+    type: String,
+    trim: true,
+    index: true,
+    unique: true,
+    sparse: true,
+  },
+  paymentLinkUrl: {
+    type: String,
+    trim: true,
+  },
   razorpay_payment_id: {
     type: String,
     trim: true,
