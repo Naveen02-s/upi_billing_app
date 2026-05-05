@@ -17,11 +17,35 @@ const normalizeStatus = (value) => {
   return "pending";
 };
 
-const statusStyles = {
-  idle: "bg-gray-100 text-gray-600",
-  pending: "bg-yellow-100 text-yellow-700",
-  paid: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
+// ✅ EXTRACTED COMPONENT
+const TransactionsList = ({ transactions }) => {
+  if (transactions.length === 0) {
+    return <p className="text-gray-500 text-sm">No transactions yet</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {transactions.map((txn) => {
+        const status = normalizeStatus(txn.status);
+
+        return (
+          <div
+            key={txn._id || txn.id}
+            className="flex justify-between items-center border-b pb-2"
+          >
+            <div>
+              <p className="font-medium">
+                ₹{txn.amount} • {txn.customerName || "Customer"}
+              </p>
+              <p className="text-xs text-gray-500">{txn.upiId}</p>
+            </div>
+
+            <span className={`status ${status}`}>{status}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 };
 
 export default function App() {
@@ -52,17 +76,14 @@ export default function App() {
 
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // ✅ Persist merchant name
   useEffect(() => {
     localStorage.setItem("merchantName", merchantName);
   }, [merchantName]);
 
-  // ✅ Persist UPI ID
   useEffect(() => {
     localStorage.setItem("upiId", upiId);
   }, [upiId]);
 
-  // ✅ Fetch transactions on login
   useEffect(() => {
     if (token) {
       fetchTransactions();
@@ -153,7 +174,7 @@ export default function App() {
     setCopyState("Copied!");
   };
 
-  // ================= LOGIN =================
+  // LOGIN UI (unchanged)
   if (!token) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-blue-500">
@@ -166,31 +187,18 @@ export default function App() {
             {isSignup ? "Create Account" : "Welcome Back"}
           </h2>
 
-          <input
-            className="input"
-            placeholder="Email"
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            className="input"
-            type="password"
-            placeholder="Password"
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <input className="input" placeholder="Email" onChange={(e) => setEmail(e.target.value)} />
+          <input className="input" type="password" placeholder="Password" onChange={(e) => setPassword(e.target.value)} />
 
           {authError && <p className="text-red-500 text-sm">{authError}</p>}
 
-          <button
-            onClick={isSignup ? signup : login}
-            className="btn-primary w-full mt-4"
-          >
-            {loadingAuth ? "Please wait..." : isSignup ? "Sign Up" : "Login"}
-          </button>
+          <div className="flex justify-center">
+            <button onClick={isSignup ? signup : login} className="btn-primary mt-4">
+              {loadingAuth ? "Please wait..." : isSignup ? "Sign Up" : "Login"}
+            </button>
+          </div>
 
-          <p
-            onClick={() => setIsSignup(!isSignup)}
-            className="text-center text-sm mt-4 cursor-pointer text-gray-600"
-          >
+          <p onClick={() => setIsSignup(!isSignup)} className="text-center text-sm mt-4 cursor-pointer text-gray-600">
             {isSignup ? "Already have account?" : "Create new account"}
           </p>
         </motion.div>
@@ -198,9 +206,14 @@ export default function App() {
     );
   }
 
-  // ================= DASHBOARD =================
+  // DASHBOARD
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
+    <div className="min-h-screen p-4 sm:p-6 relative overflow-hidden bg-gradient-to-br from-[#eef2ff] via-[#f8fafc] to-[#e0f2fe]">
+      
+      {/* Glow */}
+      <div className="absolute -top-32 -left-32 w-[400px] h-[400px] bg-indigo-400 opacity-20 blur-[120px] rounded-full"></div>
+      <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-cyan-400 opacity-20 blur-[120px] rounded-full"></div>
+
       <div className="max-w-6xl mx-auto">
 
         {/* Navbar */}
@@ -209,10 +222,7 @@ export default function App() {
             <h1 className="text-xl font-bold">UPI Billing</h1>
             <p className="text-sm text-gray-500">Dashboard</p>
           </div>
-
-          <button className="btn-secondary" onClick={logout}>
-            Logout
-          </button>
+          <button className="btn-secondary" onClick={logout}>Logout</button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -225,43 +235,10 @@ export default function App() {
               <h2 className="text-lg font-semibold mb-4">Create Payment</h2>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-                <div>
-                  <label>Merchant Name</label>
-                  <input
-                    className="input"
-                    value={merchantName}
-                    onChange={(e) => setMerchantName(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label>UPI ID</label>
-                  <input
-                    className="input"
-                    value={upiId}
-                    onChange={(e) => setUpiId(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label>Customer Name</label>
-                  <input
-                    className="input"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label>Amount</label>
-                  <input
-                    className="input"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                  />
-                </div>
-
+                <input className="input" value={merchantName} onChange={(e) => setMerchantName(e.target.value)} placeholder="Merchant Name"/>
+                <input className="input" value={upiId} onChange={(e) => setUpiId(e.target.value)} placeholder="UPI ID"/>
+                <input className="input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer Name"/>
+                <input className="input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount"/>
               </div>
 
               <div className="flex justify-center mt-4">
@@ -273,82 +250,25 @@ export default function App() {
 
             {/* QR */}
             <div className="card text-center min-h-[250px] flex items-center justify-center">
-              {qr ? (
-                <img src={qr} className="w-40 mx-auto" />
-              ) : (
-                <p className="text-gray-400">QR will appear here</p>
-              )}
+              {qr ? <img src={qr} className="w-40 mx-auto" /> : <p className="text-gray-400">QR will appear here</p>}
             </div>
 
           </div>
 
-          {/* RIGHT DESKTOP */}
+          {/* DESKTOP */}
           <div className="hidden lg:block card h-fit">
             <h2 className="text-lg font-semibold mb-4">Transactions</h2>
-
-            {transactions.length === 0 ? (
-              <p className="text-gray-500 text-sm">No transactions yet</p>
-            ) : (
-              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                {transactions.map((txn) => {
-                  const status = normalizeStatus(txn.status);
-
-                  return (
-                    <div
-                      key={txn._id || txn.id}
-                      className="flex justify-between items-center border-b pb-2"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          ₹{txn.amount} • {txn.customerName || "Customer"}
-                        </p>
-                        <p className="text-xs text-gray-500">{txn.upiId}</p>
-                      </div>
-
-                      <span className={`status ${status}`}>
-                        {status}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* MOBILE */}
-          <div className="lg:hidden card">
-            <h2 className="text-lg font-semibold mb-4">Transactions</h2>
-
-            {transactions.length === 0 ? (
-              <p className="text-gray-500 text-sm">No transactions yet</p>
-            ) : (
-              <div className="space-y-3">
-                {transactions.map((txn) => {
-                  const status = normalizeStatus(txn.status);
-
-                  return (
-                    <div
-                      key={txn._id || txn.id}
-                      className="flex justify-between items-center border-b pb-2"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          ₹{txn.amount} • {txn.customerName || "Customer"}
-                        </p>
-                        <p className="text-xs text-gray-500">{txn.upiId}</p>
-                      </div>
-
-                      <span className={`status ${status}`}>
-                        {status}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <TransactionsList transactions={transactions} />
           </div>
 
         </div>
+
+        {/* MOBILE */}
+        <div className="lg:hidden mt-6 card">
+          <h2 className="text-lg font-semibold mb-4">Transactions</h2>
+          <TransactionsList transactions={transactions} />
+        </div>
+
       </div>
     </div>
   );

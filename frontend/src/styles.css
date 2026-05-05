@@ -1,4 +1,13 @@
 /* ===== GLOBAL ===== */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth animations */
+* {
+  transition: all 0.2s ease-in-out;
+}
+
 body {
   margin: 0;
   font-family: "Inter", sans-serif;
@@ -44,54 +53,67 @@ body {
 
 /* ===== CARD ===== */
 .card {
-  background: white;
-  padding: 24px;
-  border-radius: 16px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.08);
-  transition: 0.2s;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(14px);
+  border-radius: 18px;
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,0.4);
+  box-shadow: 
+    0 10px 25px rgba(0,0,0,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.6);
+  transition: all 0.25s ease;
 }
 
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+  transform: translateY(-3px);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.08);
 }
 
 /* ===== INPUT ===== */
-input {
+.input {
   width: 100%;
-  padding: 12px;
-  margin-bottom: 14px;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  font-size: 14px;
-  transition: 0.2s;
-}
-
-input:focus {
-  border-color: #4f46e5;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: rgba(255,255,255,0.9);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(79,70,229,0.2);
+  transition: all 0.2s ease;
 }
 
+.input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+}
 /* ===== BUTTONS ===== */
-button {
+.btn-primary {
+  background: linear-gradient(135deg, #6366f1, #06b6d4);
+  color: white;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: none;
+  font-weight: 500;
+  transition: all 0.25s ease;
   width: auto;
   min-width: 160px;
-  padding: 12px 20px;
-  background: linear-gradient(135deg, #4f46e5, #6366f1);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: 0.2s;
 }
 
-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(79,70,229,0.3);
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(99,102,241,0.3);
 }
+
+.btn-secondary {
+  background: white;
+  border: 1px solid #e2e8f0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: #f8fafc;
+}
+
 
 /* ===== QR BOX ===== */
 .qr-box {
@@ -111,16 +133,25 @@ button:hover {
 
 /* ===== STATUS ===== */
 .status {
-  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 500;
 }
 
-.status.pending {
-  color: #f59e0b;
+.status.paid {
+  background: #dcfce7;
+  color: #15803d;
 }
 
-.status.success {
-  color: #10b981;
+.status.pending {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.status.failed {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 /* ===== TRANSACTIONS ===== */
@@ -169,4 +200,12 @@ label {
   color: #64748b;
   margin-bottom: 4px;
   display: block;
+}
+
+.card::-webkit-scrollbar {
+  width: 6px;
+}
+.card::-webkit-scrollbar-thumb {
+  background: #ddd;
+  border-radius: 10px;
 }
