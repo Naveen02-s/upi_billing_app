@@ -33,7 +33,7 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(false);
 
   const [merchantName, setMerchantName] = useState(
-    localStorage.getItem("merchantName") || "",
+    localStorage.getItem("merchantName") || ""
   );
 
   const [upiId, setUpiId] = useState(localStorage.getItem("upiId") || "");
@@ -47,18 +47,27 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
 
   const [upiSuggestions, setUpiSuggestions] = useState(
-  JSON.parse(localStorage.getItem("upiSuggestions")) || []
-);
+    JSON.parse(localStorage.getItem("upiSuggestions")) || []
+  );
 
-const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // ✅ Persist merchant name
   useEffect(() => {
     localStorage.setItem("merchantName", merchantName);
   }, [merchantName]);
 
+  // ✅ Persist UPI ID
   useEffect(() => {
     localStorage.setItem("upiId", upiId);
   }, [upiId]);
+
+  // ✅ Fetch transactions on login
+  useEffect(() => {
+    if (token) {
+      fetchTransactions();
+    }
+  }, [token]);
 
   const fetchTransactions = async () => {
     try {
@@ -144,7 +153,7 @@ const [showSuggestions, setShowSuggestions] = useState(false);
     setCopyState("Copied!");
   };
 
-  // ================= LOGIN UI =================
+  // ================= LOGIN =================
   if (!token) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-blue-500">
@@ -191,10 +200,11 @@ const [showSuggestions, setShowSuggestions] = useState(false);
 
   // ================= DASHBOARD =================
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
       <div className="max-w-6xl mx-auto">
+
         {/* Navbar */}
-        <div className="flex justify-between items-center mb-6 bg-white px-6 py-4 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6 bg-white px-6 py-4 rounded-2xl shadow-sm border">
           <div>
             <h1 className="text-xl font-bold">UPI Billing</h1>
             <p className="text-sm text-gray-500">Dashboard</p>
@@ -205,29 +215,30 @@ const [showSuggestions, setShowSuggestions] = useState(false);
           </button>
         </div>
 
-        {/* Form Card */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <hr style={{ margin: "12px 0 20px", borderColor: "#eee" }} />
-          {/* LEFT - FORM */}
-          <div className="lg:col-span-2">
+
+          {/* LEFT */}
+          <div className="lg:col-span-2 space-y-6">
+
+            {/* FORM */}
             <div className="card">
               <h2 className="text-lg font-semibold mb-4">Create Payment</h2>
 
-              <div className="grid md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
                 <div>
                   <label>Merchant Name</label>
                   <input
                     className="input"
-                    placeholder="Merchant Name"
                     value={merchantName}
                     onChange={(e) => setMerchantName(e.target.value)}
                   />
                 </div>
+
                 <div>
                   <label>UPI ID</label>
                   <input
                     className="input"
-                    placeholder="UPI ID"
                     value={upiId}
                     onChange={(e) => setUpiId(e.target.value)}
                   />
@@ -237,7 +248,6 @@ const [showSuggestions, setShowSuggestions] = useState(false);
                   <label>Customer Name</label>
                   <input
                     className="input"
-                    placeholder="Customer Name"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                   />
@@ -247,58 +257,97 @@ const [showSuggestions, setShowSuggestions] = useState(false);
                   <label>Amount</label>
                   <input
                     className="input"
-                    placeholder="Amount"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                   />
                 </div>
+
               </div>
 
-              <div style={{ display: "flex", justifyContent: "center" }}>
-                <button onClick={createPayment} className="btn-primary mt-4">
+              <div className="flex justify-center mt-4">
+                <button onClick={createPayment} className="btn-primary">
                   {loading ? "Generating..." : "Generate QR"}
                 </button>
               </div>
             </div>
+
+            {/* QR */}
+            <div className="card text-center min-h-[250px] flex items-center justify-center">
+              {qr ? (
+                <img src={qr} className="w-40 mx-auto" />
+              ) : (
+                <p className="text-gray-400">QR will appear here</p>
+              )}
+            </div>
+
           </div>
 
-          {/* RIGHT - QR PANEL */}
-          <div className="card flex flex-col items-center justify-center text-center min-h-[300px]">
-            {qr ? (
-              <>
-                <img src={qr} className="w-44 mb-4" />
-                <p className="text-gray-500">Scan & Pay</p>
-              </>
+          {/* RIGHT DESKTOP */}
+          <div className="hidden lg:block card h-fit">
+            <h2 className="text-lg font-semibold mb-4">Transactions</h2>
+
+            {transactions.length === 0 ? (
+              <p className="text-gray-500 text-sm">No transactions yet</p>
             ) : (
-              <p className="text-gray-400">QR will appear here</p>
+              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                {transactions.map((txn) => {
+                  const status = normalizeStatus(txn.status);
+
+                  return (
+                    <div
+                      key={txn._id || txn.id}
+                      className="flex justify-between items-center border-b pb-2"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          ₹{txn.amount} • {txn.customerName || "Customer"}
+                        </p>
+                        <p className="text-xs text-gray-500">{txn.upiId}</p>
+                      </div>
+
+                      <span className={`status ${status}`}>
+                        {status}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-        </div>
-        <div className="card mt-6">
-          <h2 className="text-lg font-semibold mb-4">Transactions</h2>
 
-          {transactions.length === 0 ? (
-            <p className="text-gray-500 text-sm">No transactions yet</p>
-          ) : (
-            <div>
-              {transactions.map((txn) => {
-                const status = normalizeStatus(txn.status);
+          {/* MOBILE */}
+          <div className="lg:hidden card">
+            <h2 className="text-lg font-semibold mb-4">Transactions</h2>
 
-                return (
-                  <div key={txn._id} className="txn">
-                    <div>
-                      <p className="font-medium">
-                        ₹{txn.amount} • {txn.customerName || "Customer"}
-                      </p>
-                      <p className="text-xs text-gray-500">{txn.upiId}</p>
+            {transactions.length === 0 ? (
+              <p className="text-gray-500 text-sm">No transactions yet</p>
+            ) : (
+              <div className="space-y-3">
+                {transactions.map((txn) => {
+                  const status = normalizeStatus(txn.status);
+
+                  return (
+                    <div
+                      key={txn._id || txn.id}
+                      className="flex justify-between items-center border-b pb-2"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          ₹{txn.amount} • {txn.customerName || "Customer"}
+                        </p>
+                        <p className="text-xs text-gray-500">{txn.upiId}</p>
+                      </div>
+
+                      <span className={`status ${status}`}>
+                        {status}
+                      </span>
                     </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
-                    <span className={`status ${status}`}>{status}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>
